@@ -1,262 +1,509 @@
 # app/routers/completions.py
-import time
-import json
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    BackgroundTasks,
+)  # Added BackgroundTasks
+from fastapi.responses import StreamingResponse  # Added
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Any, Dict, List, Union # Added List, Union
+from typing import Any, Dict, List, Union, AsyncGenerator  # Added AsyncGenerator
+import json  # Added
+import time  # Added
+import aiohttp  # Added for specific exception handling if needed by client directly, though client handles its own.
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal as SessionLocal  # Corrected import
 from app.logging_config import LOGGER
-from app.models import OpenRouterRequest
+
+# from app.models import OpenRouterRequest # Not directly used here, save_request_log_to_db handles model
 from app.openrouter_client import OpenRouterClient
 from app.schemas import (
-    CompletionRequest, CompletionResponse, CompletionChoice, OpenAIUsage,
-    ChatMessage # For transforming to chat messages if media detected
+    CompletionRequest,
+    CompletionResponse,
+    CompletionChoice,
+    OpenAIUsage,
+    ChatMessage,  # For transforming to chat messages
+    ChatCompletionStreamResponse,
+    ChatCompletionStreamChoice,
+    ChatCompletionChoiceDelta,  # For streaming legacy as chat
 )
 from app.media_processing import process_messages_for_media
-# Import the save_request_log_to_db utility
-from app.routers.chat import save_request_log_to_db, get_openrouter_client # Re-use if suitable
+
+# Import the save_request_log_to_db utility and the new wrapper from chat router
+from app.routers.chat import (
+    save_request_log_to_db,
+    get_openrouter_client,
+    _save_log_wrapper_for_bg,
+)  # Added _save_log_wrapper_for_bg
 
 router = APIRouter(prefix="/v1", tags=["Legacy Completions"])
 
 
-@router.post("/completions", response_model=CompletionResponse)
+@router.post("/completions")  # Removed response_model for flexibility
 async def create_legacy_completion(
     request_data: CompletionRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db),
-    or_client: OpenRouterClient = Depends(get_openrouter_client)
+    background_tasks: BackgroundTasks,  # Added
+    db: AsyncSession = Depends(get_db),  # Remains for now
+    or_client: OpenRouterClient = Depends(get_openrouter_client),
 ):
     start_router_processing_time = time.time()
     internal_request_id = request.state.internal_request_id
     http_session = request.app.state.http_session
 
-    # Handle prompt: if list, take first element (OpenAI allows batching, we simplify)
     prompt_text = ""
     if isinstance(request_data.prompt, list):
         if request_data.prompt:
-            prompt_text = request_data.prompt[0]
-        else: # Empty list of prompts
-            raise HTTPException(status_code=400, detail="Prompt cannot be an empty list.")
-    else:
-        prompt_text = request_data.prompt
+            prompt_text = str(request_data.prompt[0])  # Ensure it's a string
+        # else: prompt_text remains ""
+    elif request_data.prompt is not None:  # Ensure prompt is not None before str()
+        prompt_text = str(request_data.prompt)
 
-    # Transform prompt into a ChatMessage list for media processing
-    # This allows reusing the existing media processing logic.
     temp_chat_messages = [ChatMessage(role="user", content=prompt_text)]
-    
-    processed_payload_messages, media_detected, media_type, _ = await process_messages_for_media(
-        temp_chat_messages, http_session
+
+    processed_payload_messages, media_detected, media_type, _ = (
+        await process_messages_for_media(
+            temp_chat_messages, http_session  # Pass the ChatMessage list
+        )
     )
 
     is_multimodal_request = media_detected
-    
-    # Determine model and prepare OpenRouter payload
-    openrouter_payload = {}
+
+    effective_model = request_data.model
     if is_multimodal_request:
+        if not settings.VISION_MODEL:
+            LOGGER.error(
+                "Multimodal legacy request but no VISION_MODEL configured.",
+                extra={"internal_request_id": internal_request_id},
+            )
+            raise HTTPException(
+                status_code=501,
+                detail="Server not configured for multimodal legacy requests.",
+            )
         effective_model = settings.VISION_MODEL
-        LOGGER.info(f"Media detected in legacy prompt ({media_type}). Routing to vision model: {effective_model}", 
-                    extra={"internal_request_id": internal_request_id})
-        # Payload for multimodal needs to be in chat format
-        openrouter_payload = {
-            "model": effective_model,
-            "messages": processed_payload_messages, # Already structured by process_messages_for_media
-            "temperature": request_data.temperature,
-            "top_p": request_data.top_p,
-            "n": request_data.n,
-            "stream": request_data.stream, # Note: Streaming for legacy + media needs careful thought
-            "stop": request_data.stop,
-            "max_tokens": request_data.max_tokens,
-            "presence_penalty": request_data.presence_penalty,
-            "frequency_penalty": request_data.frequency_penalty,
-            "user": request_data.user,
-        }
-    else: # Text-only legacy completion
+        LOGGER.info(
+            f"Media detected in legacy prompt ({media_type}). Routing to vision model: {effective_model}",
+            extra={"internal_request_id": internal_request_id},
+        )
+    else:  # Text-only legacy completion
         effective_model = request_data.model or settings.DEFAULT_TEXT_MODEL
-        LOGGER.info(f"Text-only legacy prompt. Routing to model: {effective_model} via chat format.",
-                    extra={"internal_request_id": internal_request_id})
-        openrouter_payload = {
-            "model": effective_model,
-            "messages": [{"role": "user", "content": prompt_text}], # Simple text prompt
-            "temperature": request_data.temperature,
-            "top_p": request_data.top_p,
-            "n": request_data.n,
-            "stream": request_data.stream,
-            "stop": request_data.stop,
-            "max_tokens": request_data.max_tokens,
-            "presence_penalty": request_data.presence_penalty,
-            "frequency_penalty": request_data.frequency_penalty,
-            "user": request_data.user,
-            "logit_bias": request_data.logit_bias,
-        }
-    
-    # Remove None values from payload before sending
+        LOGGER.info(
+            f"Text-only legacy prompt. Routing to model: {effective_model} via chat format.",
+            extra={"internal_request_id": internal_request_id},
+        )
+
+    # Construct payload for OpenRouter (always as chat completion)
+    openrouter_payload = {
+        "model": effective_model,
+        "messages": processed_payload_messages,  # Use the (potentially modified for media) messages
+        "temperature": request_data.temperature,
+        "top_p": request_data.top_p,
+        "n": request_data.n,
+        "stream": request_data.stream,  # Pass stream preference
+        "stop": request_data.stop,
+        "max_tokens": request_data.max_tokens,
+        "presence_penalty": request_data.presence_penalty,
+        "frequency_penalty": request_data.frequency_penalty,
+        "user": request_data.user,
+        "logit_bias": request_data.logit_bias,
+    }
     openrouter_payload = {k: v for k, v in openrouter_payload.items() if v is not None}
 
-    # Calculate input_char_length
     current_input_char_length = len(prompt_text)
-    if is_multimodal_request: # Recalculate if messages were transformed
-        current_input_char_length = 0
-        for msg_dict_model in processed_payload_messages: # msg_dict_model is ChatMessage model instance
-            content = msg_dict_model.content
-            if isinstance(content, str): current_input_char_length += len(content)
-            elif isinstance(content, list): # content is List[Dict[str, Any]]
-                for part in content:
-                    if part.get("type") == "text": current_input_char_length += len(part.get("text", ""))
-    
+    # If multimodal, input_char_length might be more complex if we consider image data size, but for now, stick to text part.
+    if (
+        is_multimodal_request
+        and processed_payload_messages
+        and isinstance(processed_payload_messages[0].get("content"), list)
+    ):
+        current_input_char_length = sum(
+            len(part.get("text", ""))
+            for part in processed_payload_messages[0].get("content", [])
+            if part.get("type") == "text"
+        )
+
     LOGGER.info(
-        "Prepared payload for OpenRouter (legacy completions endpoint)",
+        "Prepared payload for OpenRouter (Legacy Completions as Chat)",
         extra={
             "internal_request_id": internal_request_id,
-            "payload_to_openrouter": openrouter_payload,
+            "target_model": effective_model,
             "is_multimodal": is_multimodal_request,
-            "media_type": media_type if is_multimodal_request else None,
-        }
+            "streaming_requested": request_data.stream,
+            # "payload_to_openrouter": openrouter_payload # Avoid logging full payload if too large, especially with media
+        },
     )
 
-    # Call OpenRouter (using create_chat_completion method of client)
-    openrouter_response_dict = await or_client.create_chat_completion(openrouter_payload)
+    if request_data.stream:
 
-    # Handle OpenRouter errors
-    if openrouter_response_dict.get("error"):
-        error_content = openrouter_response_dict.get("error", {}) # Renamed for clarity
-        status_code = openrouter_response_dict.get("status_code", 500)
-        
-        # Ensure status_code is a valid HTTP status code integer
-        if not isinstance(status_code, int) or not (100 <= status_code <= 599):
-            LOGGER.warning(f"Invalid status_code from OpenRouter error: {status_code}. Defaulting to 500.",
-                           extra={"internal_request_id": internal_request_id})
-            status_code = 500
+        async def stream_generator() -> AsyncGenerator[str, None]:
+            aggregated_completion_tokens = 0
+            aggregated_prompt_tokens = 0
+            aggregated_total_tokens = None
+            aggregated_cost_usd = 0.0
+            output_text_char_count = 0
+            final_openrouter_request_id = None
+            stream_had_errors = False
+            error_details_for_log = None
+            response_model_name = effective_model
+            response_id_from_stream = internal_request_id  # Default to our internal ID
+            legacy_completion_idx = 0  # For legacy stream choice index
+            stream_start_time = time.time()
+            idx = 0  # for logging total chunks sent
 
-        db_error_message = ""
-        log_error_source = "openrouter" # Default
+            try:
+                async for or_chunk_dict in or_client.create_chat_completion(
+                    openrouter_payload
+                ):
+                    if or_chunk_dict.get("error"):
+                        stream_had_errors = True
+                        error_details_for_log = or_chunk_dict.get("error")
+                        LOGGER.error(
+                            f"Error during OpenRouter stream (Legacy): {error_details_for_log}",
+                            extra={
+                                "internal_request_id": internal_request_id,
+                                "chunk": or_chunk_dict,
+                            },
+                        )
+                        break
 
-        if isinstance(error_content, dict):
-            db_error_message = str(error_content.get("message", error_content))
-        elif isinstance(error_content, str):
-            db_error_message = error_content
-            log_error_source = "client_side_error"
-        else:
-            db_error_message = str(error_content)
-            log_error_source = "unknown_error_format"
+                    if or_chunk_dict.get("stream_done") or or_chunk_dict.get(
+                        "stream_ended_without_done"
+                    ):
+                        final_openrouter_request_id = or_chunk_dict.get(
+                            "openrouter_request_id", final_openrouter_request_id
+                        )
+                        if or_chunk_dict.get("stream_ended_without_done"):
+                            LOGGER.warning(
+                                "OpenRouter stream (Legacy) ended without [DONE] message.",
+                                extra={"internal_request_id": internal_request_id},
+                            )
+                        break  # Exit loop
 
-        router_processing_duration_ms = (time.time() - start_router_processing_time) * 1000
-        
-        await save_request_log_to_db(
-            db=db, internal_request_id=internal_request_id, endpoint_called=str(request.url.path),
-            client_ip=request.client.host if request.client else None, # Added check for request.client
+                    chunk_data = or_chunk_dict.get("data")
+                    if not chunk_data:
+                        LOGGER.warning(
+                            "Empty data chunk received in legacy stream.",
+                            extra={
+                                "internal_request_id": internal_request_id,
+                                "chunk": or_chunk_dict,
+                            },
+                        )
+                        continue
+
+                    final_openrouter_request_id = or_chunk_dict.get(
+                        "openrouter_request_id", final_openrouter_request_id
+                    )
+                    response_id_from_stream = chunk_data.get(
+                        "id", response_id_from_stream
+                    )  # Use OpenRouter's chunk ID
+                    response_model_name = chunk_data.get("model", response_model_name)
+
+                    # Transform ChatCompletion chunk from OpenRouter to legacy Completion chunk format
+                    # A single legacy completion stream usually has one choice with appended text.
+                    if chunk_data.get("choices"):
+                        or_choice = chunk_data["choices"][
+                            0
+                        ]  # Assume first choice for legacy
+                        delta_content = or_choice.get("delta", {}).get("content", "")
+                        if delta_content:
+                            output_text_char_count += len(delta_content)
+
+                        # Legacy stream choice format
+                        legacy_stream_choice = {
+                            "text": delta_content,
+                            "index": legacy_completion_idx,  # OpenAI legacy stream usually has index 0 for the main completion
+                            "logprobs": or_choice.get(
+                                "logprobs"
+                            ),  # Pass through if available
+                            "finish_reason": or_choice.get("finish_reason"),
+                        }
+                        # legacy_completion_idx += 1 # Only increment if we are sending multiple choices, usually not for legacy stream
+
+                        # Legacy stream response format
+                        legacy_sse_event = {
+                            "id": response_id_from_stream,  # Use the ID from the OR chunk
+                            "object": "text_completion",  # Legacy object type
+                            "created": chunk_data.get("created", int(time.time())),
+                            "model": response_model_name,
+                            "choices": [legacy_stream_choice],
+                        }
+                        yield f"data: {json.dumps(legacy_sse_event, ensure_ascii=False)}\n\n"
+                    idx += 1
+
+                # Ensure [DONE] is sent if loop finishes without error or explicit break for error
+                if not stream_had_errors:
+                    yield "data: [DONE]\n\n"
+                elif (
+                    error_details_for_log
+                ):  # If there was an error, and we have details
+                    # Similar to chat.py, consider if [DONE] should always be sent.
+                    yield "data: [DONE]\n\n"
+
+            finally:
+                router_processing_duration_ms = (
+                    time.time() - start_router_processing_time
+                ) * 1000
+                openrouter_stream_duration_ms = (time.time() - stream_start_time) * 1000
+
+                total_tokens_for_log = None
+                if (
+                    aggregated_prompt_tokens is not None
+                    and aggregated_completion_tokens is not None
+                ):
+                    total_tokens_for_log = (
+                        aggregated_prompt_tokens + aggregated_completion_tokens
+                    )
+                elif aggregated_total_tokens is not None:
+                    total_tokens_for_log = aggregated_total_tokens
+
+                log_summary = {
+                    "openrouter_request_id": final_openrouter_request_id,
+                    "prompt_tokens": (
+                        aggregated_prompt_tokens if aggregated_prompt_tokens else None
+                    ),
+                    "completion_tokens": (
+                        aggregated_completion_tokens
+                        if aggregated_completion_tokens
+                        else None
+                    ),
+                    "total_tokens": total_tokens_for_log,
+                    "cost_usd": aggregated_cost_usd if aggregated_cost_usd else None,
+                    "latency_ms": openrouter_stream_duration_ms,
+                    "error": error_details_for_log if stream_had_errors else None,
+                    "data": {
+                        "id": response_id_from_stream,
+                        "model": response_model_name,
+                    },
+                }
+
+                background_tasks.add_task(
+                    _save_log_wrapper_for_bg,  # Use the wrapper from chat.py
+                    internal_request_id=internal_request_id,
+                    endpoint_called=str(request.url.path),
+                    client_ip=request.client.host,
+                    model_requested_by_client=request_data.model,
+                    model_routed_to_openrouter=effective_model,
+                    openrouter_response_summary=log_summary,
+                    processing_duration_ms=router_processing_duration_ms,
+                    input_char_length=current_input_char_length,
+                    output_char_length=output_text_char_count,
+                    status_code_returned_to_client=(
+                        200
+                        if not stream_had_errors
+                        else 500  # Or a more specific error code
+                    ),
+                    is_streaming=True,
+                    is_multimodal=is_multimodal_request,
+                    media_type_processed=media_type if is_multimodal_request else None,
+                    error_source=(
+                        "openrouter_stream_legacy"
+                        if stream_had_errors and error_details_for_log
+                        else None
+                    ),
+                    error_message=(
+                        str(error_details_for_log)
+                        if stream_had_errors and error_details_for_log
+                        else None
+                    ),
+                )
+                LOGGER.info(
+                    "Finished streaming legacy completion to client (logging in background).",
+                    extra={
+                        "internal_request_id": internal_request_id,
+                        "had_errors": stream_had_errors,
+                        "total_chunks_sent_to_client": idx,
+                    },
+                )
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+    else:  # Non-streaming legacy completion
+        openrouter_response_dict = None
+        async for item in or_client.create_chat_completion(openrouter_payload):
+            openrouter_response_dict = item
+            break  # Expect only one item
+
+        router_processing_duration_ms = (
+            time.time() - start_router_processing_time
+        ) * 1000
+
+        if not openrouter_response_dict:
+            LOGGER.error(
+                "No response received from OpenRouter client for non-streaming legacy request.",
+                extra={
+                    "internal_request_id": internal_request_id,
+                    "payload_model": openrouter_payload.get("model"),
+                },
+            )
+            background_tasks.add_task(
+                _save_log_wrapper_for_bg,
+                internal_request_id=internal_request_id,
+                endpoint_called=str(request.url.path),
+                client_ip=request.client.host,
+                model_requested_by_client=request_data.model,
+                model_routed_to_openrouter=effective_model,
+                openrouter_response_summary={
+                    "error": "No response from OpenRouter client (legacy)",
+                    "status_code": 503,
+                    "latency_ms": router_processing_duration_ms,
+                },
+                processing_duration_ms=router_processing_duration_ms,
+                input_char_length=current_input_char_length,
+                output_char_length=0,
+                status_code_returned_to_client=503,
+                is_streaming=False,
+                is_multimodal=is_multimodal_request,
+                media_type_processed=media_type if is_multimodal_request else None,
+                error_source="internal_client_legacy",
+                error_message="No response from OpenRouter client (legacy)",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Internal server error: No response from provider.",
+            )
+
+        if openrouter_response_dict.get("error"):
+            error_data = openrouter_response_dict.get("error")
+            status_code = openrouter_response_dict.get("status_code")
+            if (
+                isinstance(error_data, dict)
+                and "code" in error_data
+                and isinstance(error_data["code"], int)
+            ):
+                status_code = error_data["code"]
+            elif status_code is None:
+                status_code = 500
+
+            LOGGER.error(
+                f"Error from OpenRouter (Legacy Non-Streaming): Status {status_code}, Error: {error_data}",
+                extra={
+                    "internal_request_id": internal_request_id,
+                    "openrouter_error": error_data,
+                    "openrouter_status": status_code,
+                    "openrouter_full_response": openrouter_response_dict,
+                },
+            )
+            background_tasks.add_task(
+                _save_log_wrapper_for_bg,
+                internal_request_id=internal_request_id,
+                endpoint_called=str(request.url.path),
+                client_ip=request.client.host,
+                model_requested_by_client=request_data.model,
+                model_routed_to_openrouter=effective_model,
+                openrouter_response_summary=openrouter_response_dict,
+                processing_duration_ms=router_processing_duration_ms,
+                input_char_length=current_input_char_length,
+                output_char_length=0,
+                status_code_returned_to_client=status_code,
+                is_streaming=False,
+                is_multimodal=is_multimodal_request,
+                media_type_processed=media_type if is_multimodal_request else None,
+                error_source="openrouter_legacy",
+                error_message=str(
+                    error_data.get("message")
+                    if isinstance(error_data, dict)
+                    else error_data
+                ),
+            )
+            detail_to_send = (
+                error_data.get("message")
+                if isinstance(error_data, dict)
+                else str(error_data)
+            )
+            raise HTTPException(status_code=status_code, detail=detail_to_send)
+
+        # Successful non-streaming legacy response
+        or_data = openrouter_response_dict.get("data", {})
+        output_text = ""
+        if or_data.get("choices") and or_data["choices"][0].get(
+            "message"
+        ):  # From chat format
+            output_text = or_data["choices"][0]["message"].get("content", "")
+
+        current_output_char_length = len(output_text)
+
+        background_tasks.add_task(
+            _save_log_wrapper_for_bg,
+            internal_request_id=internal_request_id,
+            endpoint_called=str(request.url.path),
+            client_ip=request.client.host,
             model_requested_by_client=request_data.model,
-            model_routed_to_openrouter=effective_model, openrouter_response=openrouter_response_dict,
-            processing_duration_ms=router_processing_duration_ms, input_char_length=current_input_char_length,
-            output_char_length=0, status_code_returned_to_client=status_code,
-            is_multimodal=is_multimodal_request, media_type_processed=media_type if is_multimodal_request else None,
-            error_source=log_error_source, # Use the determined error source
-            error_message=db_error_message # Use the processed db_error_message
+            model_routed_to_openrouter=or_data.get("model", effective_model),
+            openrouter_response_summary=openrouter_response_dict,
+            processing_duration_ms=router_processing_duration_ms,
+            input_char_length=current_input_char_length,
+            output_char_length=current_output_char_length,
+            status_code_returned_to_client=200,
+            is_streaming=False,
+            is_multimodal=is_multimodal_request,
+            media_type_processed=media_type if is_multimodal_request else None,
+            error_source=None,
+            error_message=None,
         )
-        
-        LOGGER.error(
-            f"Error from OpenRouter (legacy completions): {db_error_message}", # Use db_error_message for logging
+
+        # Transform OpenRouter chat response to OpenAI legacy CompletionResponse
+        legacy_choices = []
+        if or_data.get("choices"):
+            for idx, chat_choice in enumerate(or_data.get("choices", [])):
+                text_content = ""
+                if chat_choice.get("message") and chat_choice["message"].get("content"):
+                    text_content = chat_choice["message"]["content"]
+                elif chat_choice.get("delta") and chat_choice["delta"].get("content"):
+                    # Should not happen here as this is non-streaming, but as a fallback
+                    text_content = chat_choice["delta"]["content"]
+
+                legacy_choices.append(
+                    CompletionChoice(
+                        text=text_content,
+                        index=idx,
+                        logprobs=chat_choice.get("logprobs"),  # Pass if available
+                        finish_reason=chat_choice.get("finish_reason"),
+                    )
+                )
+
+        openai_usage = OpenAIUsage(
+            prompt_tokens=openrouter_response_dict.get("prompt_tokens", 0),
+            completion_tokens=openrouter_response_dict.get("completion_tokens", 0),
+            total_tokens=openrouter_response_dict.get("total_tokens", 0),
+        )
+
+        final_response_data = CompletionResponse(
+            id=or_data.get("id", internal_request_id),
+            created=or_data.get("created", int(time.time())),
+            model=or_data.get("model", effective_model),
+            choices=legacy_choices,
+            usage=openai_usage,
+            system_fingerprint=or_data.get("system_fingerprint"),  # Pass if available
+        )
+
+        router_processing_duration_ms = (
+            time.time() - start_router_processing_time
+        ) * 1000
+        await save_request_log_to_db(
+            db=db,
+            internal_request_id=internal_request_id,
+            endpoint_called=str(request.url.path),
+            client_ip=request.client.host,
+            model_requested_by_client=request_data.model,
+            model_routed_to_openrouter=effective_model,
+            openrouter_response_summary=openrouter_response_dict,
+            processing_duration_ms=router_processing_duration_ms,
+            input_char_length=current_input_char_length,
+            output_char_length=current_output_char_length,
+            status_code_returned_to_client=200,
+            is_streaming=False,
+            is_multimodal=is_multimodal_request,
+            media_type_processed=media_type if is_multimodal_request else None,
+        )
+
+        LOGGER.info(
+            "Successfully processed legacy completion (non-streaming) and sent response to client.",
             extra={
                 "internal_request_id": internal_request_id,
-                "openrouter_response": openrouter_response_dict,
-                "status_code_from_openrouter": status_code,
-            }
+                "response_to_client": final_response_data.model_dump(exclude_none=True),
+                "model_used": final_response_data.model,
+                "usage": openai_usage.model_dump(),
+            },
         )
-
-        # Construct detail for HTTPException
-        exception_detail_error = {}
-        if isinstance(error_content, dict):
-            exception_detail_error = {
-                "message": str(error_content.get("message", "Error from OpenRouter")),
-                "type": error_content.get("type", "openrouter_error"),
-                "param": error_content.get("param"),
-                "code": error_content.get("code"),
-            }
-        elif isinstance(error_content, str): # Error content is a simple string
-            exception_detail_error = {
-                "message": error_content,
-                "type": "client_side_error",
-                "param": None,
-                "code": None,
-            }
-        else: # Fallback for unexpected error_content type
-             exception_detail_error = {
-                "message": "An unexpected error format was received from the upstream service.",
-                "type": "unknown_error_format",
-                "param": None,
-                "code": None,
-            }
-        
-        exception_detail_error["internal_request_id"] = internal_request_id
-
-        raise HTTPException(
-            status_code=status_code,
-            detail={"error": exception_detail_error}
-        )
-
-    # Process successful response from OpenRouter (which will be in ChatCompletion format)
-    or_data = openrouter_response_dict.get("data", {})
-    
-    # Transform ChatCompletion response from OpenRouter to legacy CompletionResponse format
-    response_choices = []
-    output_text_char_length = 0
-    if or_data.get("choices"):
-        for idx, choice_data in enumerate(or_data["choices"]):
-            # Extract text content from chat message structure
-            chat_message_content = choice_data.get("message", {}).get("content", "")
-            text_output = ""
-            if isinstance(chat_message_content, str):
-                text_output = chat_message_content
-            elif isinstance(chat_message_content, list): # Multimodal output, extract text parts
-                for part in chat_message_content:
-                    if part.get("type") == "text":
-                        text_output += part.get("text", "")
-            
-            output_text_char_length += len(text_output)
-            response_choices.append(
-                CompletionChoice(
-                    text=text_output,
-                    index=idx, # OpenAI spec uses choice_data.get("index", idx) but OR might not provide it
-                    finish_reason=choice_data.get("finish_reason")
-                    # logprobs might need specific handling if OpenRouter provides them differently
-                )
-            )
-    
-    usage_data = or_data.get("usage", {})
-    openai_usage = OpenAIUsage(
-        prompt_tokens=usage_data.get("prompt_tokens", 0),
-        completion_tokens=usage_data.get("completion_tokens", 0),
-        total_tokens=usage_data.get("total_tokens", 0)
-    )
-
-    final_response_data = CompletionResponse(
-        id=or_data.get("id", internal_request_id),
-        created=or_data.get("created", int(time.time())),
-        model=or_data.get("model", effective_model), # Model that OpenRouter actually used
-        choices=response_choices,
-        usage=openai_usage,
-        system_fingerprint=or_data.get("system_fingerprint")
-    )
-    
-    # Log successful request to DB
-    router_processing_duration_ms = (time.time() - start_router_processing_time) * 1000
-    await save_request_log_to_db(
-        db=db, internal_request_id=internal_request_id, endpoint_called=str(request.url.path),
-        client_ip=request.client.host, model_requested_by_client=request_data.model,
-        model_routed_to_openrouter=effective_model, openrouter_response=openrouter_response_dict,
-        processing_duration_ms=router_processing_duration_ms, input_char_length=current_input_char_length,
-        output_char_length=output_text_char_length, status_code_returned_to_client=200,
-        is_multimodal=is_multimodal_request, media_type_processed=media_type if is_multimodal_request else None
-    )
-
-    LOGGER.info(
-        "Successfully processed legacy completion request and sent response to client.",
-        extra={
-            "internal_request_id": internal_request_id,
-            "response_to_client": final_response_data.model_dump(exclude_none=True),
-            "model_used": final_response_data.model,
-            "usage": openai_usage.model_dump(),
-        }
-    )
-    return final_response_data
+        return final_response_data
