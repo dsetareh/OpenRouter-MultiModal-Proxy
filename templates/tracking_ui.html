@@ -1,0 +1,166 @@
+<!-- templates/tracking_ui.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <!-- Pico.css for styling (optional) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <style>
+        body { padding: 20px; }
+        table { width: 100%; }
+        th, td { text-align: left; padding: 8px; font-size: 0.9em; }
+        .pagination button, .controls select, .controls input { margin-right: 5px; }
+        .controls { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h1>API Request Tracking</h1>
+
+        <div class="controls">
+            <label for="sort_by">Sort by:</label>
+            <select id="sort_by">
+                <option value="timestamp" selected>Timestamp</option>
+                <option value="model_routed_to_openrouter">Model Routed</option>
+                <option value="cost_usd">Cost (USD)</option>
+                <option value="total_tokens">Total Tokens</option>
+                <option value="processing_duration_ms">Processing Time (ms)</option>
+                <option value="status_code_returned_to_client">Status Code</option>
+            </select>
+            <label for="sort_order">Order:</label>
+            <select id="sort_order">
+                <option value="desc" selected>Descending</option>
+                <option value="asc">Ascending</option>
+            </select>
+            <label for="page_size">Page Size:</label>
+            <input type="number" id="page_size" value="20" min="5" max="100">
+            <button id="apply_filters">Apply</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Internal ID</th>
+                    <th>Endpoint</th>
+                    <th>Model (Client)</th>
+                    <th>Model (Routed)</th>
+                    <th>P.Tokens</th>
+                    <th>C.Tokens</th>
+                    <th>Cost ($)</th>
+                    <th>Status</th>
+                    <th>Duration (ms)</th>
+                    <th>OR Latency (ms)</th>
+                    <th>Error</th>
+                </tr>
+            </thead>
+            <tbody id="tracking_table_body">
+                <!-- Data will be populated here by JavaScript -->
+            </tbody>
+        </table>
+
+        <div class="pagination">
+            <button id="prev_page" disabled>Previous</button>
+            <span id="page_info">Page 1 of 1</span>
+            <button id="next_page" disabled>Next</button>
+        </div>
+    </main>
+
+    <script>
+        let currentPage = 1;
+        let currentPageSize = 20;
+        let currentSortBy = 'timestamp';
+        let currentSortOrder = 'desc';
+        let totalPages = 1;
+
+        const tableBody = document.getElementById('tracking_table_body');
+        const pageInfo = document.getElementById('page_info');
+        const prevButton = document.getElementById('prev_page');
+        const nextButton = document.getElementById('next_page');
+        const sortBySelect = document.getElementById('sort_by');
+        const sortOrderSelect = document.getElementById('sort_order');
+        const pageSizeInput = document.getElementById('page_size');
+        const applyButton = document.getElementById('apply_filters');
+
+        async function fetchData() {
+            const params = new URLSearchParams({
+                page: currentPage,
+                page_size: currentPageSize,
+                sort_by: currentSortBy,
+                sort_order: currentSortOrder
+            });
+            try {
+                const response = await fetch(`/ui/tracking_data?${params.toString()}`);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Failed to fetch tracking data');
+                }
+                const data = await response.json();
+                populateTable(data.items);
+                updatePagination(data);
+            } catch (error) {
+                console.error('Error fetching tracking data:', error);
+                tableBody.innerHTML = `<tr><td colspan="12">Error loading data: ${error.message}</td></tr>`;
+            }
+        }
+
+        function populateTable(items) {
+            tableBody.innerHTML = ''; // Clear existing rows
+            if (!items || items.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="12">No data available.</td></tr>';
+                return;
+            }
+            items.forEach(item => {
+                const row = tableBody.insertRow();
+                row.insertCell().textContent = item.timestamp ? new Date(item.timestamp).toLocaleString() : 'N/A';
+                row.insertCell().textContent = item.internal_request_id || 'N/A';
+                row.insertCell().textContent = item.endpoint_called || 'N/A';
+                row.insertCell().textContent = item.model_requested_by_client || 'N/A';
+                row.insertCell().textContent = item.model_routed_to_openrouter || 'N/A';
+                row.insertCell().textContent = item.prompt_tokens === null ? 'N/A' : item.prompt_tokens;
+                row.insertCell().textContent = item.completion_tokens === null ? 'N/A' : item.completion_tokens;
+                row.insertCell().textContent = item.cost_usd === null ? 'N/A' : item.cost_usd.toFixed(5);
+                row.insertCell().textContent = item.status_code_returned_to_client || 'N/A';
+                row.insertCell().textContent = item.processing_duration_ms === null ? 'N/A' : item.processing_duration_ms;
+                row.insertCell().textContent = item.openrouter_latency_ms === null ? 'N/A' : item.openrouter_latency_ms;
+                row.insertCell().textContent = item.error_message || '';
+            });
+        }
+
+        function updatePagination(data) {
+            currentPage = data.page;
+            totalPages = data.total_pages;
+            pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+            prevButton.disabled = currentPage <= 1;
+            nextButton.disabled = currentPage >= totalPages;
+        }
+
+        prevButton.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                fetchData();
+            }
+        });
+
+        nextButton.addEventListener('click', () => {
+            if (currentPage < totalPages) {
+                currentPage++;
+                fetchData();
+            }
+        });
+
+        applyButton.addEventListener('click', () => {
+            currentPage = 1; // Reset to first page on new filter/sort
+            currentSortBy = sortBySelect.value;
+            currentSortOrder = sortOrderSelect.value;
+            currentPageSize = parseInt(pageSizeInput.value, 10) || 20;
+            fetchData();
+        });
+
+        // Initial data load
+        fetchData();
+    </script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+pydantic-settings # For the config example above
+requests
+aiohttp
+SQLAlchemy==2.*
+aiosqlite
+Jinja2
+python-json-logger
+yt-dlp
+ffmpeg-python
+faster-whisper
+Pillow
