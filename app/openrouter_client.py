@@ -27,7 +27,7 @@ class OpenRouterClient:
             headers["HTTP-Referer"] = self.referer
         if self.x_title:
             headers["X-Title"] = self.x_title
-
+        payload.setdefault("usage", {"include": True})  # Default to False if not set
         request_log_extra = {
             "url": url,
             "method": method,
