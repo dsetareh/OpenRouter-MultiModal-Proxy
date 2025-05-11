@@ -17,7 +17,7 @@ This project is an API router that intercepts multimodal requests (Image/Video),
         cp .env.example .env
         ```
     *   Edit the `.env` file and add your `OPENROUTER_API_KEY` and any other configurations. The `docker-compose.yml` file is set up to pass these variables to the container.
-    
+
     ```env
     OPENROUTER_API_KEY="YOUR_OPENROUTER_API_KEY_HERE"
     DEFAULT_TEXT_MODEL="qwen/qwen3-235b-a22b"
@@ -63,6 +63,13 @@ This project is an API router that intercepts multimodal requests (Image/Video),
     *   Allows pagination, sorting, and searching of request data.
 
 ## Supported API Endpoints
-
+#### OpenAI
 *   `POST /v1/chat/completions`
 *   `POST /v1/completions`
+#### Ollama (wip)
+*   `POST /api/chat`
+*   `POST /api/generate`
+*   `GET  /api/tags`
+#### Internal
+*   `GET  /ui/tracking_data`
+*   `GET  /ui/tracking`

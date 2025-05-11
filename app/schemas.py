@@ -1,6 +1,7 @@
 # app/schemas.py
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
+import datetime
 
 
 # OpenAI-compatible Schemas
@@ -117,3 +118,128 @@ class CompletionResponse(BaseModel):
     choices: List[CompletionChoice]
     usage: Optional[OpenAIUsage] = None  # Re-use OpenAIUsage from chat schemas
     system_fingerprint: Optional[str] = None
+
+# Ollama Schemas
+
+# /api/tags
+class OllamaTagModelDetails(BaseModel):
+    format: Optional[str] = None
+    family: Optional[str] = None
+    families: Optional[List[str]] = None
+    parameter_size: Optional[str] = None
+    quantization_level: Optional[str] = None
+
+class OllamaTagModel(BaseModel):
+    name: str
+    model: str # Added based on typical Ollama responses, though not explicitly in /api/tags doc, it's often there.
+    modified_at: datetime.datetime = Field(alias="modified_at")
+    size: int
+    digest: str
+    details: OllamaTagModelDetails
+    expires_at: Optional[datetime.datetime] = None # Added based on some Ollama versions
+    parent_model: Optional[str] = None # Added based on some Ollama versions
+
+class OllamaTagsResponse(BaseModel):
+    models: List[OllamaTagModel]
+
+# /api/generate
+class OllamaGenerateRequest(BaseModel):
+    model: str
+    prompt: str
+    images: Optional[List[str]] = None # List of base64 encoded images
+    format: Optional[str] = None # "json"
+    options: Optional[Dict[str, Any]] = None # Runtime parameters
+    system: Optional[str] = None
+    template: Optional[str] = None
+    context: Optional[List[int]] = None # Previous context array
+    stream: Optional[bool] = True # Default to true as per Ollama, but allow override
+    raw: Optional[bool] = False # Use raw prompt without templating
+    keep_alive: Optional[Union[str, float, int]] = Field(default=None, alias="keep_alive") # duration string or number
+
+class OllamaGenerateResponseStreamChunk(BaseModel):
+    model: str
+    created_at: datetime.datetime = Field(alias="created_at")
+    response: str
+    done: bool
+    # The following fields appear in the *final* chunk when stream=True
+    context: Optional[List[int]] = None
+    total_duration: Optional[int] = None
+    load_duration: Optional[int] = None
+    prompt_eval_count: Optional[int] = None
+    prompt_eval_duration: Optional[int] = None
+    eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None
+    done_reason: Optional[str] = None # Added based on Ollama docs for final stream object
+
+class OllamaGenerateResponseFinal(BaseModel): # Non-streaming or final summary of stream
+    model: str
+    created_at: datetime.datetime = Field(alias="created_at")
+    response: str
+    done: bool
+    done_reason: Optional[str] = None # Added based on Ollama docs
+    context: Optional[List[int]] = None
+    total_duration: Optional[int] = None
+    load_duration: Optional[int] = None
+    prompt_eval_count: Optional[int] = None
+    prompt_eval_duration: Optional[int] = None
+    eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None
+
+
+# /api/chat
+class OllamaToolCallDefinition(BaseModel):
+    name: str
+    arguments: Dict[str, Any]
+
+class OllamaToolDefinition(BaseModel):
+    type: str = "function" # Currently, 'function' is the only supported type
+    function: OllamaToolCallDefinition
+
+class OllamaChatMessage(BaseModel):
+    role: str # "system", "user", "assistant"
+    content: str
+    images: Optional[List[str]] = None # List of base64 encoded images
+    tool_calls: Optional[List[OllamaToolDefinition]] = None # For assistant messages requesting tool use
+
+class OllamaChatRequest(BaseModel):
+    model: str
+    messages: List[OllamaChatMessage]
+    format: Optional[str] = None # "json"
+    options: Optional[Dict[str, Any]] = None # Runtime parameters
+    stream: Optional[bool] = True # Default to true, but allow override
+    template: Optional[str] = None # Not explicitly in /api/chat but common
+    keep_alive: Optional[Union[str, float, int]] = Field(default=None, alias="keep_alive")
+    tools: Optional[List[OllamaToolDefinition]] = None # For function calling
+
+class OllamaChatMessagePart(BaseModel): # For streaming delta
+    role: Optional[str] = None
+    content: Optional[str] = None
+    images: Optional[List[str]] = None # Unlikely in delta, but for completeness
+    tool_calls: Optional[List[OllamaToolDefinition]] = None # For streaming tool calls
+
+class OllamaChatResponseStreamChunk(BaseModel):
+    model: str
+    created_at: datetime.datetime = Field(alias="created_at")
+    message: OllamaChatMessagePart # Delta of the message
+    done: bool
+    # The following fields appear in the *final* chunk when stream=True and done=True
+    done_reason: Optional[str] = None # e.g. "stop", "length", "tool_calls"
+    total_duration: Optional[int] = None
+    load_duration: Optional[int] = None
+    prompt_eval_count: Optional[int] = None
+    prompt_eval_duration: Optional[int] = None
+    eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None
+
+class OllamaChatResponseFinal(BaseModel): # Non-streaming or final summary of stream
+    model: str
+    created_at: datetime.datetime = Field(alias="created_at")
+    message: OllamaChatMessage # Full message object
+    done: bool
+    done_reason: Optional[str] = None # e.g. "stop", "length", "tool_calls"
+    total_duration: Optional[int] = None
+    load_duration: Optional[int] = None
+    prompt_eval_count: Optional[int] = None
+    prompt_eval_duration: Optional[int] = None
+    eval_count: Optional[int] = None
+    eval_duration: Optional[int] = None

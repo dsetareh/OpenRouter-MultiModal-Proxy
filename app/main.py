@@ -11,6 +11,7 @@ from app.openrouter_client import OpenRouterClient # Added
 from app.routers import chat as chat_router # Import the chat router
 from app.routers import completions as completions_router # Import the completions router
 from app.routers import ui as ui_router # Import the UI router
+from app.routers import ollama as ollama_router # Import the Ollama router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -109,6 +110,7 @@ async def log_requests_responses(request: Request, call_next):
 app.include_router(chat_router.router) # Include the chat completions router
 app.include_router(completions_router.router) # Include the legacy completions router
 app.include_router(ui_router.router) # Include the UI router
+app.include_router(ollama_router.router) # Include the Ollama router
 
 @app.get("/")
 async def read_root(request: Request): # Added request: Request to access request.state

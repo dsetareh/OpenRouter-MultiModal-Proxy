@@ -1,7 +1,7 @@
 import aiohttp
 import time
 import json
-from typing import AsyncGenerator, Dict, Any
+from typing import AsyncGenerator, Dict, List, Any
 
 from app.config import settings
 from app.logging_config import LOGGER
@@ -9,6 +9,7 @@ from app.logging_config import LOGGER
 # from app.schemas import OpenRouterResponse # If using Pydantic models from schemas.py
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"  # Default to chat
+OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 
 class OpenRouterClient:
@@ -292,6 +293,86 @@ class OpenRouterClient:
         async for item in self._request("POST", OPENROUTER_API_URL, payload):
             yield item
 
+
+    async def list_openrouter_models(self) -> List[Dict[str, Any]]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        if self.referer:
+            headers["HTTP-Referer"] = self.referer
+        if self.x_title:
+            headers["X-Title"] = self.x_title
+
+        request_log_extra = {
+            "url": OPENROUTER_MODELS_API_URL,
+            "method": "GET",
+        }
+        LOGGER.info("Sending request to OpenRouter for models list", extra=request_log_extra)
+        start_time = time.time()
+
+        try:
+            async with self.session.get(
+                OPENROUTER_MODELS_API_URL,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=60), # 60 seconds timeout
+            ) as response:
+                latency_ms = (time.time() - start_time) * 1000
+                openrouter_req_id = response.headers.get("X-Request-ID")
+
+                response_log_extra = {
+                    "url": OPENROUTER_MODELS_API_URL,
+                    "status_code": response.status,
+                    "openrouter_request_id": openrouter_req_id,
+                    "latency_ms": round(latency_ms, 2),
+                    "content_type": response.content_type,
+                }
+
+                if response.status == 200:
+                    if response.content_type == "application/json":
+                        response_data = await response.json()
+                        if "data" in response_data and isinstance(response_data["data"], list):
+                            LOGGER.info(
+                                "Successfully fetched models list from OpenRouter",
+                                extra=response_log_extra,
+                            )
+                            return response_data["data"]
+                        else:
+                            LOGGER.error(
+                                "OpenRouter models response missing 'data' list or is not a list",
+                                extra={**response_log_extra, "response_body": response_data},
+                            )
+                            return []
+                    else:
+                        error_text = await response.text()
+                        LOGGER.error(
+                            f"OpenRouter models response not JSON. Content-Type: {response.content_type}",
+                            extra={**response_log_extra, "response_body": error_text[:500]},
+                        )
+                        return []
+                else:
+                    error_text = await response.text()
+                    LOGGER.error(
+                        f"OpenRouter API error fetching models: Status {response.status}",
+                        extra={**response_log_extra, "response_body": error_text[:500]},
+                    )
+                    return []
+
+        except aiohttp.ClientError as e:
+            latency_ms = (time.time() - start_time) * 1000
+            LOGGER.error(
+                f"aiohttp.ClientError calling OpenRouter for models: {e}",
+                exc_info=True,
+                extra={"url": OPENROUTER_MODELS_API_URL, "latency_ms": latency_ms},
+            )
+            return []
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000
+            LOGGER.error(
+                f"Unexpected error calling OpenRouter for models: {e}",
+                exc_info=True,
+                extra={"url": OPENROUTER_MODELS_API_URL, "latency_ms": latency_ms},
+            )
+            return []
 
 # How to manage ClientSession:
 # One way is to create it in main.py lifespan and pass it around or use a global/singleton.
