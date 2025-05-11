@@ -179,3 +179,4 @@ cython_debug/
 *.db
 prompts/
 .vscode/
+PROJECT_PLAN.md

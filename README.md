@@ -1,7 +1,5 @@
 # OpenAI API Router with OpenRouter Backend
 
-**Last Updated:** 2025-05-11
-
 ## Objective
 
 This project is an API router designed to emulate OpenAI API endpoints. It intelligently processes requests that include image or video links, logs all activity, tracks costs, and routes requests to appropriate models via OpenRouter.
@@ -155,38 +153,3 @@ Refer to the OpenAI API documentation for request and response formats.
 *   **Log File:** `router.log.json` (configurable via `.env`)
 *   **Tracking UI:** Navigate to `http://127.0.0.1:8000/ui/tracking` in your browser to view API request logs.
 
-## Project Structure
-
-```
-oai_router/
-├── app/                    # Main application module
-│   ├── __init__.py
-│   ├── config.py           # Application configuration
-│   ├── database.py         # Database setup and session management
-│   ├── logging_config.py   # Logging setup
-│   ├── main.py             # FastAPI application entry point
-│   ├── media_processing.py # Image and video processing logic
-│   ├── models.py           # SQLAlchemy models for database
-│   ├── openrouter_client.py# Client for interacting with OpenRouter
-│   ├── schemas.py          # Pydantic schemas for request/response validation
-│   └── routers/            # API route definitions
-│       ├── __init__.py
-│       ├── chat.py         # Chat completions endpoint
-│       ├── completions.py  # Legacy completions endpoint
-│       └── ui.py           # UI endpoints
-├── templates/              # HTML templates for UI
-│   └── tracking_ui.html
-├── .env.example            # Example environment variables
-├── .gitignore
-├── PROJECT_PLAN.md         # Original project plan
-├── README.md               # This file
-├── requirements.txt        # Python dependencies
-└── router.log.json         # Default log file (created on first run)
-```
-
-## Future Enhancements (from PROJECT_PLAN.md)
-
-*   Support for streaming responses from OpenRouter.
-*   More sophisticated error handling and reporting.
-*   Advanced media processing options (e.g., image resizing, different transcription models).
-*   User authentication for the router itself.
