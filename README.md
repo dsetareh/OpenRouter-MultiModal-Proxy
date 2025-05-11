@@ -1,8 +1,41 @@
 # OpenAI API Router with OpenRouter Backend
 
-## Objective
+This project is an API router that intercepts multimodal requests (Image/Video), even when the multimodal data is a link in the text body of the request. It intelligently processes requests that include image or video links, logs all activity, tracks costs, and routes requests to appropriate models via OpenRouter.
 
-This project is an API router designed to emulate OpenAI API endpoints. It intelligently processes requests that include image or video links, logs all activity, tracks costs, and routes requests to appropriate models via OpenRouter.
+
+## Installation Guide
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/dsetareh/OpenRouter-MultiModal-Proxy
+    cd OpenRouter-MultiModal-Proxy
+    ```
+
+2.  **Configure environment variables:**
+    *   Copy `.env.example` to `.env` in the root of the project:
+        ```bash
+        cp .env.example .env
+        ```
+    *   Edit the `.env` file and add your `OPENROUTER_API_KEY` and any other configurations. The `docker-compose.yml` file is set up to pass these variables to the container.
+    
+    ```env
+    OPENROUTER_API_KEY="YOUR_OPENROUTER_API_KEY_HERE"
+    DEFAULT_TEXT_MODEL="qwen/qwen3-235b-a22b"
+    VISION_MODEL="mistralai/mistral-small-3.1-24b-instruct"
+    LOG_FILE_PATH="/data/router.log.json"
+    OPENROUTER_REFERER="http://localhost:8000"
+    OPENROUTER_X_TITLE="OpenRouterProxy"
+    DATABASE_URL="sqlite+aiosqlite:////data/openrouter-multimodal-proxy.db"
+    WHISPER_MODEL_NAME="distil-medium.en"
+    WHISPER_DEVICE="cpu"
+    ```
+
+3.  **Build and run the application using Docker Compose:**
+    Open your terminal in the project root directory and run:
+    ```bash
+    docker-compose up -d --build
+    ```
+*   The application will be available at `http://<docker_host>:8000`.
 
 ## Core Features
 
@@ -23,139 +56,13 @@ This project is an API router designed to emulate OpenAI API endpoints. It intel
     *   Includes timestamps, unique request IDs, endpoint details, and processing durations.
     *   Implements log rotation.
 *   **Cost Tracking & Analytics:**
-    *   Stores detailed request information in a local SQLite database (`OpenRouter-MultiModal-Proxy.db`).
+    *   Stores detailed request information in a local SQLite database (`.db`).
     *   Tracks model usage, tokens, costs (as reported by OpenRouter), latencies, and potential errors.
 *   **Web UI for Tracking:**
     *   Provides a web interface at `/ui/tracking` to view and filter logged API requests.
     *   Allows pagination, sorting, and searching of request data.
 
-## Technology Stack
+## Supported API Endpoints
 
-*   **Language/Framework:** Python 3.x with FastAPI
-*   **API Key Management:** `.env` file for `OPENROUTER_API_KEY` and other configurations.
-*   **Configuration:** `app/config.py` using `pydantic-settings`.
-*   **Asynchronous Operations:** `aiohttp` for non-blocking calls to OpenRouter and media downloads.
-*   **Database:** SQLite with SQLAlchemy (async support) for request logging and cost tracking.
-*   **Media Processing:**
-    *   `yt-dlp`: For downloading videos.
-    *   `ffmpeg-python`: For video frame and audio extraction.
-    *   `faster-whisper`: For audio transcription.
-    *   `Pillow`: For image handling.
-*   **Templating:** Jinja2 for the tracking UI.
-
-## Setup and Installation
-
-Follow these steps to set up and run the project locally or using Docker.
-
-### Local Setup
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/dsetareh/OpenRouter-MultiModal-Proxy
-    cd OpenRouter-MultiModal-Proxy
-    ```
-
-2.  **Create and activate a virtual environment:**
-    ```bash
-    python -m venv env
-    # On Windows
-    .\env\Scripts\activate
-    # On macOS/Linux
-    source env/bin/activate
-    ```
-
-3.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *Note: `ffmpeg` must be installed separately and available in your system's PATH for video processing features to work.*
-
-4.  **Configure environment variables:**
-    *   Copy `.env.example` to `.env`:
-        ```bash
-        copy .env.example .env # Windows
-        cp .env.example .env  # macOS/Linux
-        ```
-    *   Edit `.env` and add your `OPENROUTER_API_KEY` and any other desired configurations:
-        ```env
-        OPENROUTER_API_KEY="your_openrouter_api_key_here"
-        DEFAULT_TEXT_MODEL="openai/gpt-3.5-turbo"
-        VISION_MODEL="mistralai/mistral-small-3.1-24b-instruct"
-        LOG_FILE_PATH="router.log.json"
-        # OPENROUTER_REFERER="https://your-site-url.com" # Optional
-        # OPENROUTER_X_TITLE="Your App Name" # Optional
-        DATABASE_URL="sqlite+aiosqlite:///./OpenRouter-MultiModal-Proxy.db"
-        # Whisper model configuration (for audio transcription)
-        WHISPER_MODEL_NAME="distil-medium.en" # Or other faster-whisper compatible model, e.g., tiny.en, base, small.en, medium.en, large-v2
-        WHISPER_DEVICE="cpu" # Or "cuda" if GPU available and configured (requires appropriate PyTorch build)
-        ```
-
-5.  **Run the application:**
-    ```bash
-    uvicorn app.main:app --reload
-    ```
-    The API will typically be available at `http://127.0.0.1:8000`.
-
-### Docker Setup
-
-Alternatively, you can run the application using Docker and Docker Compose.
-
-1.  **Ensure Docker is installed:**
-    *   Download and install Docker Desktop from [https://www.docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop).
-
-2.  **Clone the repository (if not already done):**
-    ```bash
-    git clone https://github.com/dsetareh/OpenRouter-MultiModal-Proxy
-    cd OpenRouter-MultiModal-Proxy
-    ```
-
-3.  **Configure environment variables for Docker:**
-    *   Copy `.env.example` to `.env` in the root of the project:
-        ```bash
-        # On Windows (PowerShell/CMD)
-        copy .env.example .env
-        # On macOS/Linux
-        cp .env.example .env
-        ```
-    *   Edit the `.env` file and add your `OPENROUTER_API_KEY` and any other configurations. The `docker-compose.yml` file is set up to pass these variables to the container.
-        ```env
-        OPENROUTER_API_KEY="your_openrouter_api_key_here"
-        DEFAULT_TEXT_MODEL="openai/gpt-3.5-turbo"
-        VISION_MODEL="mistralai/mistral-small-3.1-24b-instruct"
-        LOG_FILE_PATH="/app/router.log.json" # Path inside the container
-        DATABASE_URL="sqlite+aiosqlite:///app/OpenRouter-MultiModal-Proxy.db" # Path inside the container
-        # OPENROUTER_REFERER="https://your-site-url.com" # Optional
-        # OPENROUTER_X_TITLE="Your App Name" # Optional
-        # Whisper model configuration (for audio transcription)
-        WHISPER_MODEL_NAME="distil-medium.en"
-        WHISPER_DEVICE="cpu"
-        ```
-        *Note: For `LOG_FILE_PATH` and `DATABASE_URL`, use the paths as they will be inside the container (e.g., `/app/router.log.json` and `/app/OpenRouter-MultiModal-Proxy.db`). The `docker-compose.yml` handles mounting local files to these container paths.*
-
-4.  **Build and run the application using Docker Compose:**
-    Open your terminal in the project root directory and run:
-    ```bash
-    docker-compose up --build
-    ```
-    *   The `--build` flag ensures the Docker image is built (or rebuilt if changes are detected).
-    *   The application will be available at `http://localhost:8000`.
-    *   Logs and the SQLite database will be stored in `router.log.json` and `OpenRouter-MultiModal-Proxy.db` in your project directory, as they are mounted as volumes.
-
-5.  **To stop the application:**
-    Press `Ctrl+C` in the terminal where `docker-compose up` is running, or run:
-    ```bash
-    docker-compose down
-    ```
-
-## API Endpoints
-
-*   **Chat Completions:** `POST /v1/chat/completions`
-*   **Legacy Completions:** `POST /v1/completions`
-
-Refer to the OpenAI API documentation for request and response formats.
-
-## Logging and Tracking UI
-
-*   **Log File:** `router.log.json` (configurable via `.env`)
-*   **Tracking UI:** Navigate to `http://127.0.0.1:8000/ui/tracking` in your browser to view API request logs.
-
+*   `POST /v1/chat/completions`
+*   `POST /v1/completions`

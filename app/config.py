@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     LOG_FILE_PATH: str = "router.log.json"
     OPENROUTER_REFERER: str | None = None
     OPENROUTER_X_TITLE: str | None = None
-    DATABASE_URL: str = "sqlite+aiosqlite:///./OpenRouter-MultiModal-Proxy.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///./openrouter-multimodal-proxy.db"
     WHISPER_MODEL_NAME: str = "distil-medium.en"
     WHISPER_DEVICE: str = "cpu"
 

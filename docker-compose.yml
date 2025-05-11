@@ -1,29 +1,25 @@
 version: '3.8'
 
 services:
-  OpenRouter-MultiModal-Proxy:
-    build: .
+  openrouter-multimodal-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oproxy
+    image: openrouter-multimodal-proxy
     ports:
       - "8000:8000"
     volumes:
       - ./app:/app/app
-      - ./.env:/app/.env  # Mount your actual .env file
-      - ./router.log.json:/app/router.log.json
-      - ./OpenRouter-MultiModal-Proxy.db:/app/OpenRouter-MultiModal-Proxy.db
+      - ./.env:/app/.env # Mount your actual .env file
+      - ./data:/data
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # Add other environment variables from your .env file as needed
       - DEFAULT_TEXT_MODEL=${DEFAULT_TEXT_MODEL:-openai/gpt-3.5-turbo}
       - VISION_MODEL=${VISION_MODEL:-mistralai/mistral-small-3.1-24b-instruct}
-      - LOG_FILE_PATH=${LOG_FILE_PATH:-/app/router.log.json}
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///app/OpenRouter-MultiModal-Proxy.db}
+      - LOG_FILE_PATH=${LOG_FILE_PATH:-/data/router.log.json}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:////data/openrouter-multimodal-proxy.db}
       # OPENROUTER_REFERER=${OPENROUTER_REFERER}
       # OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-volumes:
-  # Define named volumes if you prefer to manage data outside of bind mounts
-  # router_logs:
-  # router_db:
-  OpenRouter-MultiModal-Proxy_db_data: # Define a named volume for the database
-  OpenRouter-MultiModal-Proxy_log_data: # Define a named volume for the logs

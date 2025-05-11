@@ -14,8 +14,7 @@ from app.logging_config import LOGGER # Import the logger
 router = APIRouter(prefix="/ui", tags=["Tracking UI"])
 
 # Configure Jinja2Templates
-# Assuming 'templates' directory is at the root of the project, sibling to 'app/'
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory="app/templates")
 
 @router.get("/tracking", response_class=HTMLResponse)
 async def get_tracking_ui(request: Request):
@@ -27,7 +26,7 @@ async def get_tracking_data(
     request: Request,
     db: AsyncSession = Depends(get_db),
     page: int = 1,
-    page_size: int = 20,
+    page_size: int = 50,
     sort_by: Optional[str] = "timestamp",
     sort_order: Optional[str] = "desc" # 'asc' or 'desc'
 ):
