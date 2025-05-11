@@ -18,18 +18,6 @@ This project is an API router that intercepts multimodal requests (Image/Video),
         ```
     *   Edit the `.env` file and add your `OPENROUTER_API_KEY` and any other configurations. The `docker-compose.yml` file is set up to pass these variables to the container.
 
-    ```env
-    OPENROUTER_API_KEY="YOUR_OPENROUTER_API_KEY_HERE"
-    DEFAULT_TEXT_MODEL="qwen/qwen3-235b-a22b"
-    VISION_MODEL="mistralai/mistral-small-3.1-24b-instruct"
-    LOG_FILE_PATH="/data/router.log.json"
-    OPENROUTER_REFERER="http://localhost:8000"
-    OPENROUTER_X_TITLE="OpenRouterProxy"
-    DATABASE_URL="sqlite+aiosqlite:////data/openrouter-multimodal-proxy.db"
-    WHISPER_MODEL_NAME="distil-medium.en"
-    WHISPER_DEVICE="cpu"
-    ```
-
 3.  **Build and run the application using Docker Compose:**
     Open your terminal in the project root directory and run:
     ```bash
@@ -66,10 +54,6 @@ This project is an API router that intercepts multimodal requests (Image/Video),
 #### OpenAI
 *   `POST /v1/chat/completions`
 *   `POST /v1/completions`
-#### Ollama (wip)
-*   `POST /api/chat`
-*   `POST /api/generate`
-*   `GET  /api/tags`
 #### Internal
 *   `GET  /ui/tracking_data`
 *   `GET  /ui/tracking`

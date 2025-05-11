@@ -6,11 +6,6 @@ from typing import AsyncGenerator, Dict, List, Any
 from app.config import settings
 from app.logging_config import LOGGER
 
-# from app.schemas import OpenRouterResponse # If using Pydantic models from schemas.py
-
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"  # Default to chat
-OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
-
 
 class OpenRouterClient:
     def __init__(self, session: aiohttp.ClientSession):
@@ -18,6 +13,8 @@ class OpenRouterClient:
         self.api_key = settings.OPENROUTER_API_KEY
         self.referer = settings.OPENROUTER_REFERER
         self.x_title = settings.OPENROUTER_X_TITLE
+        self.openrouter_api_url = settings.OPENROUTER_API_URL
+        self.openrouter_models_api_url = settings.OPENROUTER_MODELS_API_URL
 
     async def _request(
         self, method: str, url: str, payload: dict
@@ -290,7 +287,7 @@ class OpenRouterClient:
         # No need to setdefault('stream', False) here if the caller is responsible.
         # However, if this method is called internally and might not have stream set,
         # it could be a good idea, but for now, assume caller sets it.
-        async for item in self._request("POST", OPENROUTER_API_URL, payload):
+        async for item in self._request("POST", self.openrouter_api_url, payload):
             yield item
 
 
@@ -304,7 +301,7 @@ class OpenRouterClient:
             headers["X-Title"] = self.x_title
 
         request_log_extra = {
-            "url": OPENROUTER_MODELS_API_URL,
+            "url": self.openrouter_models_api_url,
             "method": "GET",
         }
         LOGGER.info("Sending request to OpenRouter for models list", extra=request_log_extra)
@@ -312,7 +309,7 @@ class OpenRouterClient:
 
         try:
             async with self.session.get(
-                OPENROUTER_MODELS_API_URL,
+                self.openrouter_models_api_url,
                 headers=headers,
                 timeout=aiohttp.ClientTimeout(total=60), # 60 seconds timeout
             ) as response:
@@ -320,7 +317,7 @@ class OpenRouterClient:
                 openrouter_req_id = response.headers.get("X-Request-ID")
 
                 response_log_extra = {
-                    "url": OPENROUTER_MODELS_API_URL,
+                    "url": self.openrouter_models_api_url,
                     "status_code": response.status,
                     "openrouter_request_id": openrouter_req_id,
                     "latency_ms": round(latency_ms, 2),
@@ -362,7 +359,7 @@ class OpenRouterClient:
             LOGGER.error(
                 f"aiohttp.ClientError calling OpenRouter for models: {e}",
                 exc_info=True,
-                extra={"url": OPENROUTER_MODELS_API_URL, "latency_ms": latency_ms},
+                extra={"url": self.openrouter_models_api_url, "latency_ms": latency_ms},
             )
             return []
         except Exception as e:
@@ -370,7 +367,7 @@ class OpenRouterClient:
             LOGGER.error(
                 f"Unexpected error calling OpenRouter for models: {e}",
                 exc_info=True,
-                extra={"url": OPENROUTER_MODELS_API_URL, "latency_ms": latency_ms},
+                extra={"url": self.openrouter_models_api_url, "latency_ms": latency_ms},
             )
             return []
 
