@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  oai_router:
+  OpenRouter-MultiModal-Proxy:
     build: .
     ports:
       - "8000:8000"
@@ -9,14 +9,14 @@ services:
       - ./app:/app/app
       - ./.env:/app/.env  # Mount your actual .env file
       - ./router.log.json:/app/router.log.json
-      - ./oai_router.db:/app/oai_router.db
+      - ./OpenRouter-MultiModal-Proxy.db:/app/OpenRouter-MultiModal-Proxy.db
     environment:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       # Add other environment variables from your .env file as needed
       - DEFAULT_TEXT_MODEL=${DEFAULT_TEXT_MODEL:-openai/gpt-3.5-turbo}
       - VISION_MODEL=${VISION_MODEL:-mistralai/mistral-small-3.1-24b-instruct}
       - LOG_FILE_PATH=${LOG_FILE_PATH:-/app/router.log.json}
-      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///app/oai_router.db}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///app/OpenRouter-MultiModal-Proxy.db}
       # OPENROUTER_REFERER=${OPENROUTER_REFERER}
       # OPENROUTER_X_TITLE=${OPENROUTER_X_TITLE}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -25,5 +25,5 @@ volumes:
   # Define named volumes if you prefer to manage data outside of bind mounts
   # router_logs:
   # router_db:
-  oai_router_db_data: # Define a named volume for the database
-  oai_router_log_data: # Define a named volume for the logs
+  OpenRouter-MultiModal-Proxy_db_data: # Define a named volume for the database
+  OpenRouter-MultiModal-Proxy_log_data: # Define a named volume for the logs

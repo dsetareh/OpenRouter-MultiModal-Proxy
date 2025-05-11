@@ -31,7 +31,7 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
 
 
 def setup_logging():
-    logger = logging.getLogger("oai_router") # Create a specific logger
+    logger = logging.getLogger("OpenRouter-MultiModal-Proxy") # Create a specific logger
     logger.setLevel(logging.INFO) # Set default level
     logger.propagate = False # Prevent root logger from handling messages from this logger
 

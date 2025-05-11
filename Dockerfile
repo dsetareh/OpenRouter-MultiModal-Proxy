@@ -11,12 +11,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ./app /app/app
 COPY .env.example /app/.env.example
 COPY router.log.json /app/router.log.json
-COPY oai_router.db /app/oai_router.db
+COPY OpenRouter-MultiModal-Proxy.db /app/OpenRouter-MultiModal-Proxy.db
 
 # Ensure the log file and database file exist and are writable
 # These will be mounted as volumes in docker-compose, but good to have placeholders
 RUN touch /app/router.log.json && chmod 666 /app/router.log.json
-RUN touch /app/oai_router.db && chmod 666 /app/oai_router.db
+RUN touch /app/OpenRouter-MultiModal-Proxy.db && chmod 666 /app/OpenRouter-MultiModal-Proxy.db
 
 
 EXPOSE 8000

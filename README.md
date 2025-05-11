@@ -23,7 +23,7 @@ This project is an API router designed to emulate OpenAI API endpoints. It intel
     *   Includes timestamps, unique request IDs, endpoint details, and processing durations.
     *   Implements log rotation.
 *   **Cost Tracking & Analytics:**
-    *   Stores detailed request information in a local SQLite database (`oai_router.db`).
+    *   Stores detailed request information in a local SQLite database (`OpenRouter-MultiModal-Proxy.db`).
     *   Tracks model usage, tokens, costs (as reported by OpenRouter), latencies, and potential errors.
 *   **Web UI for Tracking:**
     *   Provides a web interface at `/ui/tracking` to view and filter logged API requests.
@@ -51,8 +51,8 @@ Follow these steps to set up and run the project locally or using Docker.
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository-url>
-    cd oai_router
+    git clone https://github.com/dsetareh/OpenRouter-MultiModal-Proxy
+    cd OpenRouter-MultiModal-Proxy
     ```
 
 2.  **Create and activate a virtual environment:**
@@ -84,7 +84,7 @@ Follow these steps to set up and run the project locally or using Docker.
         LOG_FILE_PATH="router.log.json"
         # OPENROUTER_REFERER="https://your-site-url.com" # Optional
         # OPENROUTER_X_TITLE="Your App Name" # Optional
-        DATABASE_URL="sqlite+aiosqlite:///./oai_router.db"
+        DATABASE_URL="sqlite+aiosqlite:///./OpenRouter-MultiModal-Proxy.db"
         # Whisper model configuration (for audio transcription)
         WHISPER_MODEL_NAME="distil-medium.en" # Or other faster-whisper compatible model, e.g., tiny.en, base, small.en, medium.en, large-v2
         WHISPER_DEVICE="cpu" # Or "cuda" if GPU available and configured (requires appropriate PyTorch build)
@@ -105,8 +105,8 @@ Alternatively, you can run the application using Docker and Docker Compose.
 
 2.  **Clone the repository (if not already done):**
     ```bash
-    git clone <repository-url>
-    cd oai_router
+    git clone https://github.com/dsetareh/OpenRouter-MultiModal-Proxy
+    cd OpenRouter-MultiModal-Proxy
     ```
 
 3.  **Configure environment variables for Docker:**
@@ -123,14 +123,14 @@ Alternatively, you can run the application using Docker and Docker Compose.
         DEFAULT_TEXT_MODEL="openai/gpt-3.5-turbo"
         VISION_MODEL="mistralai/mistral-small-3.1-24b-instruct"
         LOG_FILE_PATH="/app/router.log.json" # Path inside the container
-        DATABASE_URL="sqlite+aiosqlite:///app/oai_router.db" # Path inside the container
+        DATABASE_URL="sqlite+aiosqlite:///app/OpenRouter-MultiModal-Proxy.db" # Path inside the container
         # OPENROUTER_REFERER="https://your-site-url.com" # Optional
         # OPENROUTER_X_TITLE="Your App Name" # Optional
         # Whisper model configuration (for audio transcription)
         WHISPER_MODEL_NAME="distil-medium.en"
         WHISPER_DEVICE="cpu"
         ```
-        *Note: For `LOG_FILE_PATH` and `DATABASE_URL`, use the paths as they will be inside the container (e.g., `/app/router.log.json` and `/app/oai_router.db`). The `docker-compose.yml` handles mounting local files to these container paths.*
+        *Note: For `LOG_FILE_PATH` and `DATABASE_URL`, use the paths as they will be inside the container (e.g., `/app/router.log.json` and `/app/OpenRouter-MultiModal-Proxy.db`). The `docker-compose.yml` handles mounting local files to these container paths.*
 
 4.  **Build and run the application using Docker Compose:**
     Open your terminal in the project root directory and run:
@@ -139,7 +139,7 @@ Alternatively, you can run the application using Docker and Docker Compose.
     ```
     *   The `--build` flag ensures the Docker image is built (or rebuilt if changes are detected).
     *   The application will be available at `http://localhost:8000`.
-    *   Logs and the SQLite database will be stored in `router.log.json` and `oai_router.db` in your project directory, as they are mounted as volumes.
+    *   Logs and the SQLite database will be stored in `router.log.json` and `OpenRouter-MultiModal-Proxy.db` in your project directory, as they are mounted as volumes.
 
 5.  **To stop the application:**
     Press `Ctrl+C` in the terminal where `docker-compose up` is running, or run:
