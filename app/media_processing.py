@@ -29,8 +29,9 @@ VIDEO_URL_PATTERN = re.compile(
 # Placeholder for whisper model (loaded on demand)
 _whisper_model = None
 _whisper_model_name = (
-    "distil-medium.en"  # Or tiny.en for faster, less accurate. Or larger models.
+    settings.WHISPER_MODEL_NAME  # Or tiny.en for faster, less accurate. Or larger models.
 )
+_whisper_device = settings.WHISPER_DEVICE
 
 
 def get_whisper_model():
@@ -39,11 +40,15 @@ def get_whisper_model():
         try:
             from faster_whisper import WhisperModel
 
-            LOGGER.info(f"Loading faster-whisper model: {_whisper_model_name}")
+            LOGGER.info(
+                f"Loading faster-whisper model: {_whisper_model_name} on device: {_whisper_device}"
+            )
             # Specify compute_type, e.g., "int8" for CPU, "float16" for GPU if available
             # Device can be "cpu" or "cuda"
             _whisper_model = WhisperModel(
-                _whisper_model_name, device="cpu", compute_type="int8"
+                _whisper_model_name,
+                device=_whisper_device,
+                compute_type="int8",  # TODO: allow compute_type to be configurable
             )
             LOGGER.info(f"Faster-whisper model {_whisper_model_name} loaded.")
         except ImportError:
@@ -230,10 +235,16 @@ def _extract_keyframes_sync(
                 (
                     ffmpeg.input(video_path, ss=time_sec)
                     .output(
-                        frame_filename, vframes=1, format="image2", vcodec="mjpeg", **{'qscale:v': 2}
+                        frame_filename,
+                        vframes=1,
+                        format="image2",
+                        vcodec="mjpeg",
+                        **{"qscale:v": 2},
                     )
                     .run(
-                        capture_stdout=True, capture_stderr=True, overwrite_output=True # Ensure capture_stderr is True
+                        capture_stdout=True,
+                        capture_stderr=True,
+                        overwrite_output=True,  # Ensure capture_stderr is True
                     )
                 )
                 if os.path.exists(frame_filename):
@@ -246,26 +257,38 @@ def _extract_keyframes_sync(
                     LOGGER.info(f"Extracted keyframe {i+1} at {time_sec:.2f}s")
                 else:
                     LOGGER.warning(f"Failed to extract keyframe {i+1} for {video_path}")
-            except ffmpeg.Error as ffmpeg_frame_exc: # Catch specific ffmpeg.Error
-                 stderr_output = ffmpeg_frame_exc.stderr.decode('utf-8') if ffmpeg_frame_exc.stderr else "No stderr."
-                 LOGGER.error(
-                     f"ffmpeg.Error extracting keyframe {i+1} for {video_path}: {ffmpeg_frame_exc}. FFmpeg stderr: {stderr_output}",
-                     exc_info=True # Keep exc_info for full traceback
-                 )
-            except Exception as frame_exc: # General fallback for other errors
-                 LOGGER.error(f"Non-ffmpeg error extracting keyframe {i+1} for {video_path}: {frame_exc}", exc_info=True)
+            except ffmpeg.Error as ffmpeg_frame_exc:  # Catch specific ffmpeg.Error
+                stderr_output = (
+                    ffmpeg_frame_exc.stderr.decode("utf-8")
+                    if ffmpeg_frame_exc.stderr
+                    else "No stderr."
+                )
+                LOGGER.error(
+                    f"ffmpeg.Error extracting keyframe {i+1} for {video_path}: {ffmpeg_frame_exc}. FFmpeg stderr: {stderr_output}",
+                    exc_info=True,  # Keep exc_info for full traceback
+                )
+            except Exception as frame_exc:  # General fallback for other errors
+                LOGGER.error(
+                    f"Non-ffmpeg error extracting keyframe {i+1} for {video_path}: {frame_exc}",
+                    exc_info=True,
+                )
 
         LOGGER.info(f"Extracted {len(frames_base64)} keyframes successfully.")
         return frames_base64
-    except ffmpeg.Error as ffmpeg_e: # Catch specific ffmpeg.Error first
-        stderr_output = ffmpeg_e.stderr.decode('utf-8') if ffmpeg_e.stderr else "No stderr."
+    except ffmpeg.Error as ffmpeg_e:  # Catch specific ffmpeg.Error first
+        stderr_output = (
+            ffmpeg_e.stderr.decode("utf-8") if ffmpeg_e.stderr else "No stderr."
+        )
         LOGGER.error(
             f"ffmpeg.Error during keyframe extraction process for {video_path}: {ffmpeg_e}. FFmpeg stderr: {stderr_output}",
-            exc_info=True
+            exc_info=True,
         )
-        return [] # Return empty list on failure
+        return []  # Return empty list on failure
     except Exception as e:
-        LOGGER.error(f"General error extracting keyframes from {video_path} with ffmpeg: {e}", exc_info=True)
+        LOGGER.error(
+            f"General error extracting keyframes from {video_path} with ffmpeg: {e}",
+            exc_info=True,
+        )
         return []
 
 

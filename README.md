@@ -12,7 +12,7 @@ This project is an API router designed to emulate OpenAI API endpoints. It intel
 *   **Intelligent Media Processing:**
     *   Detects image and video URLs within request payloads.
     *   Processes images (downloads and converts to base64 if necessary).
-    *   Processes videos by downloading, extracting audio, transcribing audio, and extracting keyframes.
+    *   Processes videos by downloading, extracting audio, transcribing audio (using a configurable `faster-whisper` model and device), and extracting keyframes.
     *   Transforms requests with media content into a format suitable for multimodal models on OpenRouter.
 *   **OpenRouter Integration:**
     *   Routes requests to specified or default models on OpenRouter.
@@ -85,6 +85,9 @@ Follow these steps to set up and run the project locally or using Docker.
         # OPENROUTER_REFERER="https://your-site-url.com" # Optional
         # OPENROUTER_X_TITLE="Your App Name" # Optional
         DATABASE_URL="sqlite+aiosqlite:///./oai_router.db"
+        # Whisper model configuration (for audio transcription)
+        WHISPER_MODEL_NAME="distil-medium.en" # Or other faster-whisper compatible model, e.g., tiny.en, base, small.en, medium.en, large-v2
+        WHISPER_DEVICE="cpu" # Or "cuda" if GPU available and configured (requires appropriate PyTorch build)
         ```
 
 5.  **Run the application:**
@@ -123,6 +126,9 @@ Alternatively, you can run the application using Docker and Docker Compose.
         DATABASE_URL="sqlite+aiosqlite:///app/oai_router.db" # Path inside the container
         # OPENROUTER_REFERER="https://your-site-url.com" # Optional
         # OPENROUTER_X_TITLE="Your App Name" # Optional
+        # Whisper model configuration (for audio transcription)
+        WHISPER_MODEL_NAME="distil-medium.en"
+        WHISPER_DEVICE="cpu"
         ```
         *Note: For `LOG_FILE_PATH` and `DATABASE_URL`, use the paths as they will be inside the container (e.g., `/app/router.log.json` and `/app/oai_router.db`). The `docker-compose.yml` handles mounting local files to these container paths.*
 
